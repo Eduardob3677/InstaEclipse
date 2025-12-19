@@ -72,7 +72,7 @@ public class StoryMetadataViewer {
                 XposedBridge.log("(InstaEclipse | StoryMetadata): ✅ Found StoryGroupMentionTappableDataIntf class");
             }
 
-            // Hook story viewer to capture current story's mentions
+            // Hook story viewer to capture and show mentions immediately
             hookStoryViewer(bridge);
 
             FeatureStatusTracker.setHooked("StoryMetadataViewer");
@@ -106,6 +106,7 @@ public class StoryMetadataViewer {
                     // Only hook methods that return List (ArrayList)
                     String returnType = String.valueOf(method.getReturnType());
                     if (!returnType.contains("List") && !returnType.contains("ArrayList")) {
+                        XposedBridge.log("(InstaEclipse | StoryMetadata): ⏭️ Skipping non-List method: " + method.getClassName() + "." + method.getName());
                         continue;
                     }
 
@@ -121,14 +122,15 @@ public class StoryMetadataViewer {
                             try {
                                 Object result = param.getResult();
                                 if (result != null && result instanceof List) {
-                                    currentStoryMentions = result;
                                     @SuppressWarnings("unchecked")
                                     List<Object> mentions = (List<Object>) result;
                                     
                                     if (!mentions.isEmpty()) {
                                         XposedBridge.log("(InstaEclipse | StoryMetadata): 📝 Captured " + mentions.size() + " story mentions");
-                                        // Show notification when mentions are detected
-                                        showMentionsNotification();
+                                        
+                                        // Store mentions and show dialog immediately
+                                        currentStoryMentions = result;
+                                        showMentionsDialogFromBackground();
                                     }
                                 }
                             } catch (Throwable t) {
@@ -145,106 +147,72 @@ public class StoryMetadataViewer {
                 }
             }
 
-            // Hook ReelViewerFragment to add long-press handler
-            hookReelViewerFragment(bridge);
-
         } catch (Throwable t) {
             XposedBridge.log("(InstaEclipse | StoryMetadata): ❌ Failed to hook story viewer: " + t.getMessage());
         }
     }
 
-    private void hookReelViewerFragment(DexKitBridge bridge) {
-        try {
-            // Find ReelViewerFragment class
-            List<ClassData> reelViewerClasses = bridge.findClass(FindClass.create()
-                    .matcher(ClassMatcher.create()
-                            .className("instagram.features.stories.fragment.ReelViewerFragment")));
-
-            if (reelViewerClasses.isEmpty()) {
-                XposedBridge.log("(InstaEclipse | StoryMetadata): ⚠️ ReelViewerFragment not found");
-                return;
-            }
-
-            Class<?> reelViewerClass = reelViewerClasses.get(0).getInstance(Module.hostClassLoader);
-            XposedBridge.log("(InstaEclipse | StoryMetadata): ✅ Found ReelViewerFragment");
-
-            // Hook onViewCreated to add our long-press handler
-            XposedHelpers.findAndHookMethod(reelViewerClass, "onViewCreated",
-                    android.view.View.class, android.os.Bundle.class, new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (!FeatureFlags.viewStoryMetadata) {
-                        return;
-                    }
-
-                    try {
-                        android.view.View rootView = (android.view.View) param.args[0];
-                        Context context = rootView.getContext();
-
-                        // Set long press listener on the root view
-                        rootView.setOnLongClickListener(v -> {
-                            if (currentStoryMentions != null) {
-                                if (context instanceof Activity) {
-                                    showMentionsDialog((Activity) context);
-                                }
-                                return true;
-                            }
-                            return false;
-                        });
-
-                        XposedBridge.log("(InstaEclipse | StoryMetadata): ✅ Added long-press handler to story viewer");
-                    } catch (Throwable t) {
-                        XposedBridge.log("(InstaEclipse | StoryMetadata): Error adding long-press handler: " + t.getMessage());
-                    }
-                }
-            });
-
-        } catch (Throwable t) {
-            XposedBridge.log("(InstaEclipse | StoryMetadata): ❌ Failed to hook ReelViewerFragment: " + t.getMessage());
-        }
-    }
-
-    private void showMentionsNotification() {
-        // This will be called when mentions are detected
-        // We can show a toast or subtle indicator
+    private void showMentionsDialogFromBackground() {
         new Handler(Looper.getMainLooper()).post(() -> {
             try {
-                Context context = null;
-                if (Module.hostClassLoader != null) {
-                    // Try to get context from current activity
-                    Class<?> activityThreadClass = Class.forName("android.app.ActivityThread", false, Module.hostClassLoader);
-                    Method currentActivityThreadMethod = activityThreadClass.getMethod("currentActivityThread");
-                    Object activityThread = currentActivityThreadMethod.invoke(null);
+                // Get current activity
+                Activity activity = getCurrentActivity();
+                if (activity != null && !activity.isFinishing()) {
+                    // Show a toast first
+                    android.widget.Toast.makeText(activity, 
+                            "👥 " + getMentionCount() + " mentions found! Tap to view", 
+                            android.widget.Toast.LENGTH_LONG).show();
                     
-                    Field activitiesField = activityThreadClass.getDeclaredField("mActivities");
-                    activitiesField.setAccessible(true);
-                    Object activities = activitiesField.get(activityThread);
-                    
-                    if (activities instanceof java.util.Map) {
-                        @SuppressWarnings("unchecked")
-                        java.util.Map<Object, Object> activitiesMap = (java.util.Map<Object, Object>) activities;
-                        for (Object activityRecord : activitiesMap.values()) {
-                            Class<?> activityRecordClass = activityRecord.getClass();
-                            Field activityField = activityRecordClass.getDeclaredField("activity");
-                            activityField.setAccessible(true);
-                            Activity activity = (Activity) activityField.get(activityRecord);
-                            if (activity != null && !activity.isFinishing()) {
-                                context = activity;
-                                break;
-                            }
-                        }
-                    }
-                }
-                
-                if (context != null) {
-                    android.widget.Toast.makeText(context, 
-                            "👥 Mentions detected! Long-press to view", 
-                            android.widget.Toast.LENGTH_SHORT).show();
+                    // Show the dialog after a short delay
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        showMentionsDialog(activity);
+                    }, 500);
                 }
             } catch (Throwable t) {
-                XposedBridge.log("(InstaEclipse | StoryMetadata): Error showing notification: " + t.getMessage());
+                XposedBridge.log("(InstaEclipse | StoryMetadata): Error showing dialog: " + t.getMessage());
             }
         });
+    }
+
+    private Activity getCurrentActivity() {
+        try {
+            Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
+            Method currentActivityThreadMethod = activityThreadClass.getMethod("currentActivityThread");
+            Object activityThread = currentActivityThreadMethod.invoke(null);
+            
+            Field activitiesField = activityThreadClass.getDeclaredField("mActivities");
+            activitiesField.setAccessible(true);
+            Object activities = activitiesField.get(activityThread);
+            
+            if (activities instanceof java.util.Map) {
+                @SuppressWarnings("unchecked")
+                java.util.Map<Object, Object> activitiesMap = (java.util.Map<Object, Object>) activities;
+                for (Object activityRecord : activitiesMap.values()) {
+                    Class<?> activityRecordClass = activityRecord.getClass();
+                    Field activityField = activityRecordClass.getDeclaredField("activity");
+                    activityField.setAccessible(true);
+                    Activity activity = (Activity) activityField.get(activityRecord);
+                    if (activity != null && !activity.isFinishing()) {
+                        return activity;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("(InstaEclipse | StoryMetadata): Error getting activity: " + t.getMessage());
+        }
+        return null;
+    }
+
+    private int getMentionCount() {
+        try {
+            if (currentStoryMentions instanceof List) {
+                List<MentionedUser> users = extractMentionedUsers(currentStoryMentions);
+                return users.size();
+            }
+        } catch (Throwable t) {
+            // Ignore
+        }
+        return 0;
     }
 
     private void showMentionsDialog(Activity activity) {
