@@ -59,6 +59,7 @@ public class SettingsManager {
         editor.putBoolean("disableVideoAutoPlay", FeatureFlags.disableVideoAutoPlay);
         editor.putBoolean("showFollowerToast", FeatureFlags.showFollowerToast);
         editor.putBoolean("showFeatureToasts", FeatureFlags.showFeatureToasts);
+        editor.putBoolean("viewStoryMetadata", FeatureFlags.viewStoryMetadata);
 
         editor.apply();
 
@@ -110,6 +111,7 @@ public class SettingsManager {
         FeatureFlags.disableVideoAutoPlay = prefs.getBoolean("disableVideoAutoPlay", false);
         FeatureFlags.showFollowerToast = prefs.getBoolean("showFollowerToast", false);
         FeatureFlags.showFeatureToasts = prefs.getBoolean("showFeatureToasts", false);
+        FeatureFlags.viewStoryMetadata = prefs.getBoolean("viewStoryMetadata", false);
 
         FeatureManager.refreshFeatureStatus();
     }
