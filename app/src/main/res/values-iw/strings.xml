@@ -107,4 +107,8 @@
     <!-- contributor card -->
     <string name="contributor_name">שם התורם</string>
 
+    <!-- Links -->
+    <string name="github">GitHub</string>
+    <string name="telegram">Telegram</string>
+
 </resources>
