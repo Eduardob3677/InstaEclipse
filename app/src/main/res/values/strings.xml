@@ -115,6 +115,8 @@
     <string name="video_autoplay">Disable Video Auto play</string>
     <string name="follower_toast">Show Follower Toast</string>
     <string name="hooked_methods_toast">Show Enabled Features Toast</string>
+    <string name="story_metadata_viewer">View Story Metadata</string>
+    <string name="story_metadata_description">View hidden mentions in Instagram stories</string>
 
     <!-- contributor card -->
     <string name="contributor_name">Contributor Name</string>
