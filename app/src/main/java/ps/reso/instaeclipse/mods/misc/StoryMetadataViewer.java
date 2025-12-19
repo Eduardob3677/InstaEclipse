@@ -145,32 +145,26 @@ public class StoryMetadataViewer {
                     Class<?> clazz = classData.getInstance(Module.hostClassLoader);
                     
                     // Hook the method that builds or shows the menu
-                    List<MethodData> showMethods = bridge.findMethod(FindMethod.create()
-                            .searchInClass(classData.getName())
-                            .matcher(MethodMatcher.create()
-                                    .returnType("void")
-                                    .paramCount(0)));
-
-                    for (MethodData methodData : showMethods) {
-                        try {
-                            Method method = methodData.getMethodInstance(Module.hostClassLoader);
-                            
-                            XposedBridge.hookMethod(method, new XC_MethodHook() {
-                                @Override
-                                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                                    if (!FeatureFlags.viewStoryMetadata) {
-                                        return;
+                    // Find methods in this class
+                    for (Method method : clazz.getDeclaredMethods()) {
+                        if (method.getReturnType().equals(void.class) && method.getParameterCount() == 0) {
+                            try {
+                                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                                    @Override
+                                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                                        if (!FeatureFlags.viewStoryMetadata) {
+                                            return;
+                                        }
+                                        
+                                        try {
+                                            addMentionsMenuItem(param.thisObject);
+                                        } catch (Throwable t) {
+                                            XposedBridge.log("(InstaEclipse | StoryMetadata): Error adding menu item: " + t.getMessage());
+                                        }
                                     }
-                                    
-                                    try {
-                                        addMentionsMenuItem(param.thisObject);
-                                    } catch (Throwable t) {
-                                        XposedBridge.log("(InstaEclipse | StoryMetadata): Error adding menu item: " + t.getMessage());
-                                    }
-                                }
-                            });
-
-                        } catch (Throwable ignored) {
+                                });
+                            } catch (Throwable ignored) {
+                            }
                         }
                     }
 
