@@ -34,8 +34,12 @@ public class DevOptionsEnable {
                     .matcher(ClassMatcher.create().usingStrings("is_employee"))
             );
 
-            if (classes.isEmpty()) return;
+            if (classes.isEmpty()) {
+                XposedBridge.log("(InstaEclipse | DevOptionsEnable): ⚠️ No classes found with 'is_employee' string");
+                return;
+            }
 
+            boolean hooked = false;
             for (ClassData classData : classes) {
                 String className = classData.getName();
                 if (!className.startsWith("X.")) continue;
@@ -50,18 +54,25 @@ public class DevOptionsEnable {
                 if (methods.isEmpty()) continue;
 
                 for (MethodData method : methods) {
-                    inspectInvokedMethods(bridge, method);
+                    if (inspectInvokedMethods(bridge, method)) {
+                        hooked = true;
+                        return; // Exit after first successful hook
+                    }
                 }
+            }
+            
+            if (!hooked) {
+                XposedBridge.log("(InstaEclipse | DevOptionsEnable): ⚠️ No suitable methods found to hook");
             }
         } catch (Exception e) {
             XposedBridge.log("(InstaEclipse | DevOptionsEnable): ❌ Error during discovery: " + e.getMessage());
         }
     }
 
-    private void inspectInvokedMethods(DexKitBridge bridge, MethodData method) {
+    private boolean inspectInvokedMethods(DexKitBridge bridge, MethodData method) {
         try {
             List<MethodData> invokedMethods = method.getInvokes();
-            if (invokedMethods.isEmpty()) return;
+            if (invokedMethods.isEmpty()) return false;
 
             for (MethodData invokedMethod : invokedMethods) {
                 String returnType = String.valueOf(invokedMethod.getReturnType());
@@ -78,22 +89,23 @@ public class DevOptionsEnable {
 
                     String targetClass = invokedMethod.getClassName();
                     XposedBridge.log("(InstaEclipse | DevOptionsEnable): 📦 Hooking boolean methods in: " + targetClass);
-                    hookAllBooleanMethodsInClass(bridge, targetClass);
-                    return;
+                    return hookAllBooleanMethodsInClass(bridge, targetClass);
                 }
             }
         } catch (Exception e) {
             XposedBridge.log("(InstaEclipse | DevOptionsEnable): ❌ Error inspecting invoked methods: " + e.getMessage());
         }
+        return false;
     }
 
-    private void hookAllBooleanMethodsInClass(DexKitBridge bridge, String className) {
+    private boolean hookAllBooleanMethodsInClass(DexKitBridge bridge, String className) {
         try {
             List<MethodData> methods = bridge.findMethod(FindMethod.create()
                     .matcher(MethodMatcher.create()
                             .declaredClass(className))
             );
 
+            boolean hooked = false;
             for (MethodData method : methods) {
                 String returnType = String.valueOf(method.getReturnType());
                 List<String> paramTypes = new java.util.ArrayList<>();
@@ -120,6 +132,7 @@ public class DevOptionsEnable {
 
                         XposedBridge.log("(InstaEclipse | DevOptionsEnable): ✅ Hooked: " +
                                 method.getClassName() + "." + method.getName());
+                        hooked = true;
 
                     } catch (Throwable e) {
                         XposedBridge.log("(InstaEclipse | DevOptionsEnable): ❌ Failed to hook " + method.getName() + ": " + e.getMessage());
@@ -127,8 +140,11 @@ public class DevOptionsEnable {
                 }
             }
 
+            return hooked;
+
         } catch (Exception e) {
             XposedBridge.log("(InstaEclipse | DevOptionsEnable): ❌ Error while hooking class: " + className + " → " + e.getMessage());
+            return false;
         }
     }
 }
