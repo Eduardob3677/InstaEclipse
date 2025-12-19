@@ -75,9 +75,6 @@ public class StoryMetadataViewer {
             // Hook story viewer to capture current story's mentions
             hookStoryViewer(bridge);
 
-            // Hook the three-dot menu (options menu) to add our custom menu item
-            hookStoryOptionsMenu(bridge);
-
             FeatureStatusTracker.setHooked("StoryMetadataViewer");
 
         } catch (Throwable t) {
@@ -100,6 +97,18 @@ public class StoryMetadataViewer {
 
             for (MethodData method : methods) {
                 try {
+                    // Skip static initializers and constructors
+                    if (method.getName().equals("<clinit>") || method.getName().equals("<init>")) {
+                        XposedBridge.log("(InstaEclipse | StoryMetadata): ⏭️ Skipping " + method.getClassName() + "." + method.getName());
+                        continue;
+                    }
+
+                    // Only hook methods that return List (ArrayList)
+                    String returnType = String.valueOf(method.getReturnType());
+                    if (!returnType.contains("List") && !returnType.contains("ArrayList")) {
+                        continue;
+                    }
+
                     Method reflectMethod = method.getMethodInstance(Module.hostClassLoader);
                     
                     XposedBridge.hookMethod(reflectMethod, new XC_MethodHook() {
@@ -113,7 +122,14 @@ public class StoryMetadataViewer {
                                 Object result = param.getResult();
                                 if (result != null && result instanceof List) {
                                     currentStoryMentions = result;
-                                    XposedBridge.log("(InstaEclipse | StoryMetadata): 📝 Captured story mentions");
+                                    @SuppressWarnings("unchecked")
+                                    List<Object> mentions = (List<Object>) result;
+                                    
+                                    if (!mentions.isEmpty()) {
+                                        XposedBridge.log("(InstaEclipse | StoryMetadata): 📝 Captured " + mentions.size() + " story mentions");
+                                        // Show notification when mentions are detected
+                                        showMentionsNotification();
+                                    }
                                 }
                             } catch (Throwable t) {
                                 XposedBridge.log("(InstaEclipse | StoryMetadata): Error capturing mentions: " + t.getMessage());
@@ -129,90 +145,106 @@ public class StoryMetadataViewer {
                 }
             }
 
+            // Hook ReelViewerFragment to add long-press handler
+            hookReelViewerFragment(bridge);
+
         } catch (Throwable t) {
             XposedBridge.log("(InstaEclipse | StoryMetadata): ❌ Failed to hook story viewer: " + t.getMessage());
         }
     }
 
-    private void hookStoryOptionsMenu(DexKitBridge bridge) {
+    private void hookReelViewerFragment(DexKitBridge bridge) {
         try {
-            // Find BottomSheet or Dialog classes that show story options
-            List<ClassData> bottomSheetClasses = bridge.findClass(FindClass.create()
+            // Find ReelViewerFragment class
+            List<ClassData> reelViewerClasses = bridge.findClass(FindClass.create()
                     .matcher(ClassMatcher.create()
-                            .usingStrings("report_story", "mute_story")));
+                            .className("instagram.features.stories.fragment.ReelViewerFragment")));
 
-            for (ClassData classData : bottomSheetClasses) {
-                try {
-                    Class<?> clazz = classData.getInstance(Module.hostClassLoader);
-                    
-                    // Hook the method that builds or shows the menu
-                    // Find methods in this class
-                    for (Method method : clazz.getDeclaredMethods()) {
-                        if (method.getReturnType().equals(void.class) && method.getParameterCount() == 0) {
-                            try {
-                                XposedBridge.hookMethod(method, new XC_MethodHook() {
-                                    @Override
-                                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                                        if (!FeatureFlags.viewStoryMetadata) {
-                                            return;
-                                        }
-                                        
-                                        try {
-                                            addMentionsMenuItem(param.thisObject);
-                                        } catch (Throwable t) {
-                                            XposedBridge.log("(InstaEclipse | StoryMetadata): Error adding menu item: " + t.getMessage());
-                                        }
-                                    }
-                                });
-                            } catch (Throwable ignored) {
-                            }
-                        }
-                    }
-
-                } catch (Throwable e) {
-                    XposedBridge.log("(InstaEclipse | StoryMetadata): Error hooking menu class: " + e.getMessage());
-                }
+            if (reelViewerClasses.isEmpty()) {
+                XposedBridge.log("(InstaEclipse | StoryMetadata): ⚠️ ReelViewerFragment not found");
+                return;
             }
 
+            Class<?> reelViewerClass = reelViewerClasses.get(0).getInstance(Module.hostClassLoader);
+            XposedBridge.log("(InstaEclipse | StoryMetadata): ✅ Found ReelViewerFragment");
+
+            // Hook onViewCreated to add our long-press handler
+            XposedHelpers.findAndHookMethod(reelViewerClass, "onViewCreated",
+                    android.view.View.class, android.os.Bundle.class, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (!FeatureFlags.viewStoryMetadata) {
+                        return;
+                    }
+
+                    try {
+                        android.view.View rootView = (android.view.View) param.args[0];
+                        Context context = rootView.getContext();
+
+                        // Set long press listener on the root view
+                        rootView.setOnLongClickListener(v -> {
+                            if (currentStoryMentions != null) {
+                                if (context instanceof Activity) {
+                                    showMentionsDialog((Activity) context);
+                                }
+                                return true;
+                            }
+                            return false;
+                        });
+
+                        XposedBridge.log("(InstaEclipse | StoryMetadata): ✅ Added long-press handler to story viewer");
+                    } catch (Throwable t) {
+                        XposedBridge.log("(InstaEclipse | StoryMetadata): Error adding long-press handler: " + t.getMessage());
+                    }
+                }
+            });
+
         } catch (Throwable t) {
-            XposedBridge.log("(InstaEclipse | StoryMetadata): ❌ Failed to hook options menu: " + t.getMessage());
+            XposedBridge.log("(InstaEclipse | StoryMetadata): ❌ Failed to hook ReelViewerFragment: " + t.getMessage());
         }
     }
 
-    private void addMentionsMenuItem(Object menuObject) {
-        try {
-            // Try to find the container view and add our menu item
-            Context context = (Context) XposedHelpers.callMethod(menuObject, "getContext");
-            
-            if (context instanceof Activity) {
-                Activity activity = (Activity) context;
-                
-                // Create a custom menu item view
-                LinearLayout menuItem = new LinearLayout(activity);
-                menuItem.setOrientation(LinearLayout.HORIZONTAL);
-                menuItem.setPadding(40, 30, 40, 30);
-                menuItem.setClickable(true);
-                menuItem.setFocusable(true);
-                
-                TextView textView = new TextView(activity);
-                textView.setText("👥 View Mentioned Users");
-                textView.setTextColor(Color.WHITE);
-                textView.setTextSize(16);
-                
-                menuItem.addView(textView);
-                menuItem.setOnClickListener(v -> showMentionsDialog(activity));
-                
-                // Try to add to parent layout
-                ViewGroup parent = activity.findViewById(android.R.id.content);
-                if (parent != null) {
-                    // This is a simplified approach - in practice, you'd need to find the actual menu container
-                    XposedBridge.log("(InstaEclipse | StoryMetadata): ✅ Added mentions menu item");
+    private void showMentionsNotification() {
+        // This will be called when mentions are detected
+        // We can show a toast or subtle indicator
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                Context context = null;
+                if (Module.hostClassLoader != null) {
+                    // Try to get context from current activity
+                    Class<?> activityThreadClass = Class.forName("android.app.ActivityThread", false, Module.hostClassLoader);
+                    Method currentActivityThreadMethod = activityThreadClass.getMethod("currentActivityThread");
+                    Object activityThread = currentActivityThreadMethod.invoke(null);
+                    
+                    Field activitiesField = activityThreadClass.getDeclaredField("mActivities");
+                    activitiesField.setAccessible(true);
+                    Object activities = activitiesField.get(activityThread);
+                    
+                    if (activities instanceof java.util.Map) {
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<Object, Object> activitiesMap = (java.util.Map<Object, Object>) activities;
+                        for (Object activityRecord : activitiesMap.values()) {
+                            Class<?> activityRecordClass = activityRecord.getClass();
+                            Field activityField = activityRecordClass.getDeclaredField("activity");
+                            activityField.setAccessible(true);
+                            Activity activity = (Activity) activityField.get(activityRecord);
+                            if (activity != null && !activity.isFinishing()) {
+                                context = activity;
+                                break;
+                            }
+                        }
+                    }
                 }
+                
+                if (context != null) {
+                    android.widget.Toast.makeText(context, 
+                            "👥 Mentions detected! Long-press to view", 
+                            android.widget.Toast.LENGTH_SHORT).show();
+                }
+            } catch (Throwable t) {
+                XposedBridge.log("(InstaEclipse | StoryMetadata): Error showing notification: " + t.getMessage());
             }
-            
-        } catch (Throwable t) {
-            XposedBridge.log("(InstaEclipse | StoryMetadata): Error adding menu item view: " + t.getMessage());
-        }
+        });
     }
 
     private void showMentionsDialog(Activity activity) {
