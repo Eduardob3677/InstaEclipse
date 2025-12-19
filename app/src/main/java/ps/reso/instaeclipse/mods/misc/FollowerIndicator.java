@@ -24,7 +24,32 @@ public class FollowerIndicator {
     public FollowMethodResult findFollowerStatusMethod(DexKitBridge bridge) {
         try {
 
-            // Step 1:  Get the second Boolean method in FriendshipStatus
+            // Step 1:  Try to find method using "followed_by" string reference
+            try {
+                // Search for methods that reference "followed_by" string
+                List<MethodData> followedByMethods = bridge.findMethod(FindMethod.create()
+                        .matcher(MethodMatcher.create().usingStrings("followed_by")));
+
+                if (!followedByMethods.isEmpty()) {
+                    // Look for a method that returns Boolean and has appropriate context
+                    for (MethodData method : followedByMethods) {
+                        String returnType = String.valueOf(method.getReturnType());
+                        if (returnType.contains("boolean") || returnType.contains("Boolean")) {
+                            // This might be a direct match
+                            String className = method.getClassName();
+                            if (className.contains("FriendshipStatus") || className.contains("User")) {
+                                type = "followed_by_string";
+                                XposedBridge.log("(InstaEclipse | FollowerIndicator): Found via 'followed_by' string: " + className + "." + method.getName());
+                                return new FollowMethodResult(method.getName(), className);
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable e) {
+                XposedBridge.log("(InstaEclipse | FollowerIndicator): Step 1 failed: " + e.getMessage());
+            }
+
+            // Step 2:  Get the second Boolean method in FriendshipStatus
             try {
 
                 // Find all methods declared inside com.instagram.user.model.FriendshipStatus
@@ -36,11 +61,12 @@ public class FollowerIndicator {
                     return new FollowMethodResult(followedByMethod.getName(), followedByMethod.getClassName());
                 }
 
-            } catch (Throwable ignore) {
+            } catch (Throwable e) {
+                XposedBridge.log("(InstaEclipse | FollowerIndicator): Step 2 failed: " + e.getMessage());
             }
 
             try {
-                // Step 2: Try method detection (obfuscated User class)
+                // Step 3: Try method detection (obfuscated User class)
                 String obfUserClass = null;
                 List<MethodData> errMethods = bridge.findMethod(FindMethod.create().matcher(MethodMatcher.create().usingStrings("ERROR_INSERT_EXPIRED_URL")));
                 if (!errMethods.isEmpty()) {
@@ -63,11 +89,12 @@ public class FollowerIndicator {
                         }
                     }
                 }
-            } catch (Throwable ignore) {
+            } catch (Throwable e) {
+                XposedBridge.log("(InstaEclipse | FollowerIndicator): Step 3 failed: " + e.getMessage());
             }
 
             try {
-                // Step 3: Fallback to old detection
+                // Step 4: Fallback to old detection
                 List<MethodData> methodsOld = bridge.findMethod(FindMethod.create().matcher(MethodMatcher.create().usingStrings("", "", "").paramCount(2)));
 
                 for (MethodData method : methodsOld) {
@@ -84,12 +111,15 @@ public class FollowerIndicator {
                         }
                     }
                 }
-            } catch (Throwable ignore) {
+            } catch (Throwable e) {
+                XposedBridge.log("(InstaEclipse | FollowerIndicator): Step 4 failed: " + e.getMessage());
             }
 
         } catch (Throwable e) {
-            XposedBridge.log("❌ Error in findFollowerStatusMethod: " + e.getMessage());
+            XposedBridge.log("(InstaEclipse | FollowerIndicator): ❌ Error in findFollowerStatusMethod: " + e.getMessage());
+            XposedBridge.log(android.util.Log.getStackTraceString(e));
         }
+        XposedBridge.log("(InstaEclipse | FollowerIndicator): ❌ All detection methods failed - no suitable method found");
         return null;
     }
 
