@@ -74,4 +74,13 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * Method to check if the Xposed module is active.
+     * This method is hooked by the Xposed module to return true when the module is loaded.
+     * @return false by default, true when hooked by Xposed
+     */
+    public static boolean isModuleActive() {
+        return false;
+    }
+
 }
