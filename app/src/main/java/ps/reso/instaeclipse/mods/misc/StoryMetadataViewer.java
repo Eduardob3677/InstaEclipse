@@ -6,8 +6,6 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
@@ -31,6 +29,8 @@ import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -44,6 +44,7 @@ public class StoryMetadataViewer {
     private static Class<?> interactiveClass;
     private static Class<?> storyGroupMentionDataClass;
     private static Object currentStoryMentions = null;
+    private static final ExecutorService imageLoadExecutor = Executors.newFixedThreadPool(3);
 
     public void handleStoryMetadataViewer(DexKitBridge bridge) {
         try {
@@ -316,17 +317,32 @@ public class StoryMetadataViewer {
     }
 
     private void loadProfilePicture(ImageView imageView, String url) {
-        new Thread(() -> {
+        // Validate HTTPS URL
+        if (url == null || (!url.startsWith("https://") && !url.startsWith("http://"))) {
+            XposedBridge.log("(InstaEclipse | StoryMetadata): Invalid profile picture URL");
+            return;
+        }
+
+        imageLoadExecutor.execute(() -> {
+            InputStream input = null;
             try {
-                InputStream input = new URL(url).openStream();
+                input = new URL(url).openStream();
                 Bitmap bitmap = BitmapFactory.decodeStream(input);
                 new Handler(Looper.getMainLooper()).post(() -> {
                     imageView.setImageBitmap(bitmap);
                 });
             } catch (Exception e) {
                 XposedBridge.log("(InstaEclipse | StoryMetadata): Failed to load profile pic: " + e.getMessage());
+            } finally {
+                if (input != null) {
+                    try {
+                        input.close();
+                    } catch (Exception e) {
+                        XposedBridge.log("(InstaEclipse | StoryMetadata): Failed to close input stream: " + e.getMessage());
+                    }
+                }
             }
-        }).start();
+        });
     }
 
     private List<MentionedUser> extractMentionedUsers(Object mentionsData) {
