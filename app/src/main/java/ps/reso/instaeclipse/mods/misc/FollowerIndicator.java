@@ -117,7 +117,7 @@ public class FollowerIndicator {
 
         } catch (Throwable e) {
             XposedBridge.log("(InstaEclipse | FollowerIndicator): ❌ Error in findFollowerStatusMethod: " + e.getMessage());
-            e.printStackTrace();
+            XposedBridge.log(android.util.Log.getStackTraceString(e));
         }
         XposedBridge.log("(InstaEclipse | FollowerIndicator): ❌ All detection methods failed - no suitable method found");
         return null;

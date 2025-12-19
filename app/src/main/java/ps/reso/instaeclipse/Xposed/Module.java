@@ -251,7 +251,7 @@ public class Module implements IXposedHookLoadPackage, IXposedHookZygoteInit {
                         }
                     } catch (Throwable e) {
                         XposedBridge.log("(InstaEclipse | FollowerToast): ❌ Failed to hook: " + e.getMessage());
-                        e.printStackTrace();
+                        XposedBridge.log(android.util.Log.getStackTraceString(e));
                     }
 
                     // Network Interceptor
